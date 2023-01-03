@@ -1,6 +1,7 @@
 from typing import Dict, List
 
 from localstack.services.stores import AccountRegionBundle, BaseStore, LocalAttribute
+import threading
 
 
 class SnsStore(BaseStore):
@@ -18,6 +19,9 @@ class SnsStore(BaseStore):
 
     # list of sent SMS messages - TODO: expose via internal API
     sms_messages: List[Dict] = LocalAttribute(default=list)
+
+    # fifo mutex used for FIFO topics
+    fifo_mutex: threading.Lock = LocalAttribute(default=threading.Lock)
 
 
 sns_stores = AccountRegionBundle("sns", SnsStore)

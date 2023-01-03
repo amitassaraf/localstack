@@ -170,30 +170,20 @@ def publish_message(
         )
         return message_id
 
-    def send_message_to_subscribers():
-        message_to_subscribers(
+    LOG.debug("Publishing message to TopicArn: %s | Message: %s", topic_arn, message)
+    start_thread(
+        lambda _: message_to_subscribers(
             message_id,
             message,
             topic_arn,
-            # TODO: check
             req_data,
             headers,
             subscription_arn,
             skip_checks,
             message_attributes,
-        )
-
-    LOG.debug("Publishing message to TopicArn: %s | Message: %s", topic_arn, message)
-    if topic_arn and ".fifo" in topic_arn:
-        # FIFO topics need to be processed sequentially
-        # Note: this adds significant delay to publishing messages to FIFO topics,
-        # but it is necessary to ensure FIFO message ordering
-        send_message_to_subscribers()
-    else:
-        start_thread(
-            send_message_to_subscribers,
-            name="sns-message_to_subscribers",
-        )
+        ),
+        name="sns-message_to_subscribers",
+    )
 
     return message_id
 
@@ -907,24 +897,31 @@ def message_to_subscribers(
     subscriptions = store.sns_subscriptions.get(topic_arn, [])
 
     async def wait_for_messages_sent():
-        subs = [
-            message_to_subscriber(
-                message_id,
-                message,
-                topic_arn,
-                req_data,
-                headers,
-                subscription_arn,
-                skip_checks,
-                store,
-                subscriber,
-                subscriptions,
-                message_attributes,
-            )
-            for subscriber in list(subscriptions)
-        ]
-        if subs:
-            await asyncio.wait(subs)
+        async def async_send_and_wait():
+            subs = [
+                message_to_subscriber(
+                    message_id,
+                    message,
+                    topic_arn,
+                    req_data,
+                    headers,
+                    subscription_arn,
+                    skip_checks,
+                    store,
+                    subscriber,
+                    subscriptions,
+                    message_attributes,
+                )
+                for subscriber in list(subscriptions)
+            ]
+            if subs:
+                await asyncio.wait(subs)
+
+        if topic_arn and ".fifo" in topic_arn:
+            with store.fifo_mutex:
+                await async_send_and_wait()
+        else:
+            await async_send_and_wait()
 
     asyncio.run(wait_for_messages_sent())
 
